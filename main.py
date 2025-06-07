@@ -7,6 +7,11 @@ import pandas as pd
 from wordcloud import WordCloud
 import nltk
 import string
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+
 from nltk.corpus import stopwords
 from nltk.stem.wordnet import WordNetLemmatizer
 import matplotlib.pyplot as plt
