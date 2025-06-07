@@ -2,6 +2,7 @@
 import streamlit as st
 import time
 import requests
+import math
 import pandas as pd
 from wordcloud import WordCloud
 import nltk
@@ -17,8 +18,8 @@ from bertopic import BERTopic
 stopwords_list = requests.get("https://gist.githubusercontent.com/rg089/35e00abf8941d72d419224cfd5b5925d/raw/12d899b70156fd0041fa9778d657330b024b959c/stopwords.txt").content
 stopwords = set(stopwords_list.decode().splitlines())
 
-def plot_top_words(model, feature_names, n_top_words, title):
-    fig, axes = plt.subplots(4, 5, figsize=(30, 15), sharex=True)
+def plot_top_words(model, feature_names, n_top_words, title, n_components):
+    fig, axes = plt.subplots(math.ceil(n_components/5), 5, figsize=(30, 15), sharex=True)
     axes = axes.flatten()
     for topic_idx, topic in enumerate(model.components_):
         top_features_ind = topic.argsort()[-n_top_words:]
@@ -75,6 +76,28 @@ def get_request(url,parameters=None, steamspy=False):
             time.sleep(10)
             print('Retrying.')
             return get_request(url, parameters, steamspy)
+        
+def plot_nmf_topics(data_samples, n_features, stop_words, n_components, n_top_words, init, title):
+    """Plot NMF topics."""
+    tfidf_vectorizer = TfidfVectorizer(
+        max_df=0.95, min_df=2, max_features=n_features, stop_words=stop_words
+    )
+    tfidf = tfidf_vectorizer.fit_transform(data_samples)
+    
+    nmf = NMF(
+    n_components=n_components,
+    random_state=1,
+    init=init,
+    beta_loss="frobenius",
+    alpha_W=0.00015,
+    alpha_H=0.00015,
+    l1_ratio=1,
+    ).fit(tfidf)
+    
+    tfidf_feature_names = tfidf_vectorizer.get_feature_names_out()
+    plot_top_words(
+        nmf, tfidf_feature_names, n_top_words, title, n_components
+    )
         
 @st.cache_data
 def get_steam_df():
@@ -144,124 +167,26 @@ df = df[df["name"].str.contains(search_input, case=False, na=False)]
 if search_request:
     appname = st.selectbox("Select game", df["name"], disabled=not search_request)
     appid = df[df["name"]==appname].index[0]
-    extra_stop_words = {"n't", "game", "games", "play", "steam", "valve", "played", "playing", "good", "bad", "like", "love", "hate", "enjoy", "fun", "great", "awesome", "amazing", "fantastic"}
+    extra_stop_words = {"lot","10","h1","n't", "game", "games", "play", "steam", "valve", "played", "playing"}
     extra_stop_words = extra_stop_words.union(set(appname.lower().split()))
     stop_words = stopwords.union(extra_stop_words)
     good_review_list, bad_review_list, summary = parse_steamreviews_request(appid)
+    n_samples = 1000
+    n_features = 400
+    n_components = 20
+    n_top_words = 3
+    batch_size = 128
+    init = "nndsvda"
+    
     st.write("Good Reviews:")
     good_wordcloud = WordCloud(width=800,stopwords=stop_words, height=400, background_color='black').generate(' '.join(good_review_list))   
     st.image(good_wordcloud.to_array())
+    plot_nmf_topics(good_review_list, n_features, list(stop_words), n_components, n_top_words, init, title="Topics in Good Reviews")
+    
     st.write("Bad Reviews:")
     bad_wordcloud = WordCloud(width=800,stopwords=stop_words, height=400, background_color='black').generate(' '.join(bad_review_list))   
     st.image(bad_wordcloud.to_array())
-    
-    stop_words = list(stop_words)
-    st.write(stop_words)
-    
-    n_samples = 2000
-    n_features = 1000
-    n_components = 10
-    n_top_words = 2
-    batch_size = 128
-    init = "nndsvda"
-    data_samples = good_review_list
-    
-    print("Extracting tf-idf features for NMF...")
-    tfidf_vectorizer = TfidfVectorizer(
-        max_df=0.95, min_df=2, max_features=n_features, stop_words=stop_words
-    )
-    tfidf = tfidf_vectorizer.fit_transform(data_samples)
-    tf_vectorizer = CountVectorizer(
-    max_df=0.95, min_df=2, max_features=n_features, stop_words=stop_words
-    )
-    tf = tf_vectorizer.fit_transform(data_samples)
-    
-    nmf = NMF(
-    n_components=n_components,
-    random_state=1,
-    init=init,
-    beta_loss="frobenius",
-    alpha_W=0.00005,
-    alpha_H=0.00005,
-    l1_ratio=1,
-    ).fit(tfidf)
-    
-    tfidf_feature_names = tfidf_vectorizer.get_feature_names_out()
-    plot_top_words(
-        nmf, tfidf_feature_names, n_top_words, "Topics in NMF model (Frobenius norm)"
-    )
-    
-    nmf = NMF(
-    n_components=n_components,
-    random_state=1,
-    init=init,
-    beta_loss="kullback-leibler",
-    solver="mu",
-    max_iter=1000,
-    alpha_W=0.00005,
-    alpha_H=0.00005,
-    l1_ratio=0.5,
-    ).fit(tfidf)
+    plot_nmf_topics(bad_review_list, n_features, list(stop_words), n_components, n_top_words, init, title="Topics in Bad Reviews")  
 
-    tfidf_feature_names = tfidf_vectorizer.get_feature_names_out()
-    plot_top_words(
-        nmf,
-        tfidf_feature_names,
-        n_top_words,
-        "Topics in NMF model (generalized Kullback-Leibler divergence)",
-    )
     
-    mbnmf = MiniBatchNMF(
-    n_components=n_components,
-    random_state=1,
-    batch_size=batch_size,
-    init=init,
-    beta_loss="frobenius",
-    alpha_W=0.00005,
-    alpha_H=0.00005,
-    l1_ratio=0.5,
-    ).fit(tfidf)
 
-
-    tfidf_feature_names = tfidf_vectorizer.get_feature_names_out()
-    plot_top_words(
-        mbnmf,
-        tfidf_feature_names,
-        n_top_words,
-        "Topics in MiniBatchNMF model (Frobenius norm)",
-    )
-    
-    mbnmf = MiniBatchNMF(
-        n_components=n_components,
-        random_state=1,
-        batch_size=batch_size,
-        init=init,
-        beta_loss="kullback-leibler",
-        alpha_W=0.00005,
-        alpha_H=0.00005,
-        l1_ratio=0.5,
-    ).fit(tfidf)
-
-    tfidf_feature_names = tfidf_vectorizer.get_feature_names_out()
-    plot_top_words(
-        mbnmf,
-        tfidf_feature_names,
-        n_top_words,
-        "Topics in MiniBatchNMF model (generalized Kullback-Leibler divergence)",
-    )
-    
-    lda = LatentDirichletAllocation(
-    n_components=n_components,
-    max_iter=5,
-    learning_method="online",
-    learning_offset=50.0,
-    random_state=0,
-    )
-    lda.fit(tf)
-
-    tf_feature_names = tf_vectorizer.get_feature_names_out()
-    plot_top_words(lda, tf_feature_names, n_top_words, "Topics in LDA model")
-    
-    topic_model = BERTopic(verbose=True)
-    topics, probs = topic_model.fit_transform(good_review_list)
-    st.plotly_chart(topic_model.visualize_topics())
