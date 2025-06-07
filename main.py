@@ -8,9 +8,9 @@ from wordcloud import WordCloud
 import nltk
 import string
 try:
-    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('tokenizers/punkt-tab')
 except LookupError:
-    nltk.download('punkt')
+    nltk.download('punkt-tab')
 
 from nltk.corpus import stopwords
 from nltk.stem.wordnet import WordNetLemmatizer
