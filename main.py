@@ -11,6 +11,7 @@ try:
     nltk.data.find('tokenizers/punkt_tab')
 except LookupError:
     nltk.download('punkt_tab')
+    nltk.download('wordnet')
 
 from nltk.corpus import stopwords
 from nltk.stem.wordnet import WordNetLemmatizer
