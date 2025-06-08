@@ -61,19 +61,19 @@ def generate_wordclouds(model, feature_names, n_top_words, n_components, pos_sum
     for i, img in enumerate(wordcloud_images):
         if i % 5 == 0:
             with col1:
-                st.image(img)
+                st.image(img, use_container_width=True)
         elif i % 5 == 1:
             with col2:
-                st.image(img)
+                st.image(img, use_container_width=True)
         elif i % 5 == 2:
             with col3:
-                st.image(img)
+                st.image(img, use_container_width=True)
         elif i % 5 == 3:
             with col4:
-                st.image(img)
+                st.image(img, use_container_width=True)
         else:
             with col5:  
-                st.image(img)
+                st.image(img, use_container_width=True)
 
 def get_request(url,parameters=None, steamspy=False):
     """Return json-formatted response of a get request using optional parameters.
