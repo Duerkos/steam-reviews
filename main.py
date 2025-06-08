@@ -13,7 +13,9 @@ except LookupError:
     nltk.download('wordnet')
 
 from nltk.corpus import stopwords
-from nltk.stem.wordnet import WordNetLemmatizer
+from nltk.stem.wordnet import WordNetLemmatizer   
+from io import BytesIO
+from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from requests.exceptions import SSLError
@@ -23,7 +25,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 stopwords_list = requests.get("https://gist.githubusercontent.com/rg089/35e00abf8941d72d419224cfd5b5925d/raw/12d899b70156fd0041fa9778d657330b024b959c/stopwords.txt").content
 stopwords = set(stopwords_list.decode().splitlines())
 
-def generate_wordclouds(model, feature_names, n_top_words, n_components, pos_sum_percent, tot_sum):
+def generate_wordclouds(model, feature_names, n_top_words, n_components, pos_sum_percent, tot_sum, header):
     sorted_indices = np.argsort(tot_sum)[::-1]  # Sort topics by descending tot_sum
     wordcloud_images = []
 
@@ -57,23 +59,21 @@ def generate_wordclouds(model, feature_names, n_top_words, n_components, pos_sum
         # Convert to image
         img = wc.to_array()
         wordcloud_images.append(img)
-    col1, col2, col3, col4, col5 = st.columns(5)
-    for i, img in enumerate(wordcloud_images):
-        if i % 5 == 0:
-            with col1:
-                st.image(img, use_container_width=True)
-        elif i % 5 == 1:
-            with col2:
-                st.image(img, use_container_width=True)
-        elif i % 5 == 2:
-            with col3:
-                st.image(img, use_container_width=True)
-        elif i % 5 == 3:
-            with col4:
-                st.image(img, use_container_width=True)
-        else:
-            with col5:  
-                st.image(img, use_container_width=True)
+    
+    base_width = 1000
+    wpercent = (base_width / float(header.size[0]))
+    hsize = int((float(header.size[1]) * float(wpercent)))
+    header = header.resize((base_width, hsize), Image.Resampling.LANCZOS)
+    header = np.array(header)
+    
+    vertical_groups = []
+    for i in range(5, len(wordcloud_images), 5):
+        group = np.hstack(wordcloud_images[i:i+5])
+        vertical_groups.append(group)
+
+    vertical_stack = np.vstack([header]+vertical_groups)  # Combine groups vertically
+
+    st.image(vertical_stack, use_container_width=True)
 
 def get_request(url,parameters=None, steamspy=False):
     """Return json-formatted response of a get request using optional parameters.
@@ -115,7 +115,7 @@ def get_request(url,parameters=None, steamspy=False):
             print('Retrying.')
             return get_request(url, parameters, steamspy)
         
-def plot_nmf_topics(good_review_list, bad_review_list, n_features, stop_words, n_components, n_top_words, init, title):
+def plot_nmf_topics(good_review_list, bad_review_list, n_features, stop_words, n_components, n_top_words, init, img):
     """Plot NMF topics."""
     tfidf_vectorizer = TfidfVectorizer(
         max_df=0.95, min_df=2, max_features=n_features, stop_words=stop_words
@@ -139,7 +139,7 @@ def plot_nmf_topics(good_review_list, bad_review_list, n_features, stop_words, n
     tot_sum = pos_sum + neg_sum
     pos_sum_percent = pos_sum / (tot_sum+0.01)
     generate_wordclouds(
-        nmf, tfidf_feature_names, n_top_words, n_components, pos_sum_percent, tot_sum
+        nmf, tfidf_feature_names, n_top_words, n_components, pos_sum_percent, tot_sum, img
     )
         
 @st.cache_data
@@ -247,6 +247,8 @@ df = df[df["name"].str.contains(search_input, case=False, na=False)]
 if search_request:
     appname = st.selectbox("Select game", df["name"], disabled=not search_request, index=0)
     col_image, col_stats = st.columns(2)
+    response = requests.get(f"https://cdn.akamai.steamstatic.com/steam/apps/{df[df['name']==appname].index[0]}/header.jpg")
+    img = Image.open(BytesIO(response.content))
     with col_image:
         st.image(f"https://cdn.akamai.steamstatic.com/steam/apps/{df[df['name']==appname].index[0]}/header.jpg", use_container_width=True)
     with col_stats:
@@ -277,7 +279,7 @@ if search_request:
         init = "nndsvda"
         
         st.write("Summary of reviews:")
-        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words), n_components, n_top_words, init, title="Topics in Bad Reviews")
+        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words), n_components, n_top_words, init, img)
 
         good_review_list, bad_review_list, summary = parse_steamreviews_request_balanced(appid)
         n_samples = 1000
@@ -288,4 +290,4 @@ if search_request:
         init = "nndsvda"
         
         st.write("Comparison of good vs bad reviews:")
-        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words), n_components, n_top_words, init, title="Topics in Bad Reviews")
+        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words), n_components, n_top_words, init, img)

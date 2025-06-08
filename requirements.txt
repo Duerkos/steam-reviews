@@ -3,3 +3,4 @@ nltk
 streamlit
 wordcloud
 pandas
+pillow
