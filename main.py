@@ -37,7 +37,7 @@ def add_summary_text_image(header, summary,subtext):
 
     # Load a font (adjust the path and size as needed)
 
-    req = requests.get("https://github.com/googlefonts/roboto/blob/master/src/hinted/Roboto-Regular.ttf?raw=true")
+    req = requests.get("https://github.com/googlefonts/roboto/blob/main/src/hinted/Roboto-Regular.ttf?raw=true")
 
     font = ImageFont.truetype(BytesIO(req.content), 32)
 
@@ -314,7 +314,7 @@ if search_request:
         
         st.write("Summary of reviews:")
         plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words),
-                        n_components, n_top_words, init, img, summary, "Popular Opinions:")
+                        n_components, n_top_words, init, img, summary, "Popular Opinions")
 
         good_review_list, bad_review_list, summary_not_needed = parse_steamreviews_request_balanced(appid)
         n_samples = 1000
@@ -326,4 +326,4 @@ if search_request:
         
         st.write("Comparison of good vs bad reviews:")
         plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words),
-                        n_components, n_top_words, init, img, summary, "The Good & the Bad:")
+                        n_components, n_top_words, init, img, summary, "The Good & the Bad")
