@@ -15,7 +15,7 @@ except LookupError:
 from nltk.corpus import stopwords
 from nltk.stem.wordnet import WordNetLemmatizer   
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from requests.exceptions import SSLError
@@ -25,7 +25,42 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 stopwords_list = requests.get("https://gist.githubusercontent.com/rg089/35e00abf8941d72d419224cfd5b5925d/raw/12d899b70156fd0041fa9778d657330b024b959c/stopwords.txt").content
 stopwords = set(stopwords_list.decode().splitlines())
 
-def generate_wordclouds(model, feature_names, n_top_words, n_components, pos_sum_percent, tot_sum, header):
+def add_summary_text_image(header, summary,subtext):
+
+    img = header
+
+    # Get image dimensions
+    width, height = img.size
+
+    # Create a drawing object
+    draw = ImageDraw.Draw(img)
+
+    # Load a font (adjust the path and size as needed)
+    font = ImageFont.truetype("arial.ttf", 40)
+
+    # Define text and position
+    text1 = f"Positive: {summary['total_positive']/ summary['total_reviews']:.2%}"
+    text2 = subtext
+
+    # Calculate position (bottom-left)
+    x = 10  # Small margin from the left
+    y = height - 100  # Adjust based on font size
+
+    # Get bounding box for multiline text
+    text = f"{text1}\n{text2}"
+    bbox = draw.multiline_textbbox((x, y), text, font=font)
+
+    # Draw black rectangle behind text
+    draw.rectangle((bbox[0] - 5, bbox[1] - 5, bbox[2] + 5, bbox[3] + 5), fill="black")
+
+    # Draw text on top of the black background
+    draw.multiline_text((x, y), text, font=font, fill="white")
+
+
+# Save or show the image
+    return np.array(img)
+
+def generate_wordclouds(model, feature_names, n_top_words, n_components, pos_sum_percent, tot_sum, header, summary, subtext):
     sorted_indices = np.argsort(tot_sum)[::-1]  # Sort topics by descending tot_sum
     wordcloud_images = []
 
@@ -48,9 +83,6 @@ def generate_wordclouds(model, feature_names, n_top_words, n_components, pos_sum
 
         # Generate word cloud using a single color
         wc = WordCloud(width=200, height=200, background_color="black", 
-                       color_func=lambda *args, **kwargs: rgb_color,
-                       normalize_plurals=True).generate_from_frequencies(word_freq)
-        wc = WordCloud(width=200, height=200, background_color="black", 
                        prefer_horizontal=1.0,
                        color_func=lambda *args, **kwargs: rgb_color,
                        normalize_plurals=True).generate_from_text(" ".join(top_features))
@@ -64,10 +96,10 @@ def generate_wordclouds(model, feature_names, n_top_words, n_components, pos_sum
     wpercent = (base_width / float(header.size[0]))
     hsize = int((float(header.size[1]) * float(wpercent)))
     header = header.resize((base_width, hsize), Image.Resampling.LANCZOS)
-    header = np.array(header)
+    header = add_summary_text_image(header, summary, subtext)
     
     vertical_groups = []
-    for i in range(5, len(wordcloud_images), 5):
+    for i in range(0, len(wordcloud_images), 5):
         group = np.hstack(wordcloud_images[i:i+5])
         vertical_groups.append(group)
 
@@ -115,7 +147,7 @@ def get_request(url,parameters=None, steamspy=False):
             print('Retrying.')
             return get_request(url, parameters, steamspy)
         
-def plot_nmf_topics(good_review_list, bad_review_list, n_features, stop_words, n_components, n_top_words, init, img):
+def plot_nmf_topics(good_review_list, bad_review_list, n_features, stop_words, n_components, n_top_words, init, img, summary, subtext):
     """Plot NMF topics."""
     tfidf_vectorizer = TfidfVectorizer(
         max_df=0.95, min_df=2, max_features=n_features, stop_words=stop_words
@@ -139,7 +171,7 @@ def plot_nmf_topics(good_review_list, bad_review_list, n_features, stop_words, n
     tot_sum = pos_sum + neg_sum
     pos_sum_percent = pos_sum / (tot_sum+0.01)
     generate_wordclouds(
-        nmf, tfidf_feature_names, n_top_words, n_components, pos_sum_percent, tot_sum, img
+        nmf, tfidf_feature_names, n_top_words, n_components, pos_sum_percent, tot_sum, img, summary, subtext
     )
         
 @st.cache_data
@@ -193,7 +225,6 @@ def parse_steamreviews_request_balanced(appid):
                 bad_review_list.append(review["review"])
         # get next page of reviews
         parameters["cursor"] = json_data["cursor"]
-        summary = json_data['query_summary']
         #st.write(json_data)
     return good_review_list, bad_review_list, summary
 
@@ -270,7 +301,7 @@ if search_request:
         extra_stop_words = extra_stop_words.union(set(appname.lower().split()))
         stop_words = stopwords.union(extra_stop_words)
         
-        good_review_list, bad_review_list, summary = parse_steamreviews_request_raw(appid)
+        good_review_list, bad_review_list, summary_not_needed = parse_steamreviews_request_raw(appid)
         n_samples = 1000
         n_features = 400
         n_components = 30
@@ -279,9 +310,10 @@ if search_request:
         init = "nndsvda"
         
         st.write("Summary of reviews:")
-        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words), n_components, n_top_words, init, img)
+        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words),
+                        n_components, n_top_words, init, img, summary, "Popular Opinions:")
 
-        good_review_list, bad_review_list, summary = parse_steamreviews_request_balanced(appid)
+        good_review_list, bad_review_list, summary_not_needed = parse_steamreviews_request_balanced(appid)
         n_samples = 1000
         n_features = 400
         n_components = 30
@@ -290,4 +322,5 @@ if search_request:
         init = "nndsvda"
         
         st.write("Comparison of good vs bad reviews:")
-        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words), n_components, n_top_words, init, img)
+        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words),
+                        n_components, n_top_words, init, img, summary, "The Good & the Bad:")
