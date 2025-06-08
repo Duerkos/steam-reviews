@@ -2,11 +2,10 @@
 import streamlit as st
 import time
 import requests
-import math
 import pandas as pd
+import numpy as np
 from wordcloud import WordCloud
 import nltk
-import string
 try:
     nltk.data.find('tokenizers/punkt_tab')
 except LookupError:
@@ -16,32 +15,66 @@ except LookupError:
 from nltk.corpus import stopwords
 from nltk.stem.wordnet import WordNetLemmatizer
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from requests.exceptions import SSLError
-from sklearn.decomposition import NMF, LatentDirichletAllocation, MiniBatchNMF
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.decomposition import NMF
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 stopwords_list = requests.get("https://gist.githubusercontent.com/rg089/35e00abf8941d72d419224cfd5b5925d/raw/12d899b70156fd0041fa9778d657330b024b959c/stopwords.txt").content
 stopwords = set(stopwords_list.decode().splitlines())
 
-def plot_top_words(model, feature_names, n_top_words, title, n_components):
-    fig, axes = plt.subplots(math.ceil(n_components/5), 5, figsize=(30, 15), sharex=True)
-    axes = axes.flatten()
-    for topic_idx, topic in enumerate(model.components_):
+def generate_wordclouds(model, feature_names, n_top_words, n_components, pos_sum_percent, tot_sum):
+    sorted_indices = np.argsort(tot_sum)[::-1]  # Sort topics by descending tot_sum
+    wordcloud_images = []
+
+    # Create a color mapping from red (0) to white (0.5) to green (1)
+    cmap = plt.get_cmap("RdYlGn")
+    norm = mcolors.Normalize(vmin=0, vmax=1)  # Normalize pos_sum_percent to [0, 1]
+
+    for topic_idx in sorted_indices[:n_components]:  # Limit to n_components
+        topic = model.components_[topic_idx]
         top_features_ind = topic.argsort()[-n_top_words:]
         top_features = feature_names[top_features_ind]
         weights = topic[top_features_ind]
 
-        ax = axes[topic_idx]
-        ax.barh(top_features, weights, height=0.7)
-        ax.set_title(f"Topic {topic_idx + 1}", fontdict={"fontsize": 30})
-        ax.tick_params(axis="both", which="major", labelsize=20)
-        for i in "top right left".split():
-            ax.spines[i].set_visible(False)
-        fig.suptitle(title, fontsize=40)
+        # Create word frequency dictionary
+        word_freq = {word: weight+0.01 for word, weight in zip(top_features, weights)}
 
-    plt.subplots_adjust(top=0.90, bottom=0.05, wspace=0.90, hspace=0.3)
-    st.pyplot(fig)
-    
+        # Determine the RGB colors for words based on pos_sum_percent
+        topic_color = cmap(norm(pos_sum_percent[topic_idx]))  # Get color from colormap
+        rgb_color = f"rgb({int(topic_color[0]*255)}, {int(topic_color[1]*255)}, {int(topic_color[2]*255)})"
+
+        # Generate word cloud using a single color
+        wc = WordCloud(width=200, height=200, background_color="black", 
+                       color_func=lambda *args, **kwargs: rgb_color,
+                       normalize_plurals=True).generate_from_frequencies(word_freq)
+        wc = WordCloud(width=200, height=200, background_color="black", 
+                       prefer_horizontal=1.0,
+                       color_func=lambda *args, **kwargs: rgb_color,
+                       normalize_plurals=True).generate_from_text(" ".join(top_features))
+
+
+        # Convert to image
+        img = wc.to_array()
+        wordcloud_images.append(img)
+    col1, col2, col3, col4, col5 = st.columns(5)
+    for i, img in enumerate(wordcloud_images):
+        if i % 5 == 0:
+            with col1:
+                st.image(img)
+        elif i % 5 == 1:
+            with col2:
+                st.image(img)
+        elif i % 5 == 2:
+            with col3:
+                st.image(img)
+        elif i % 5 == 3:
+            with col4:
+                st.image(img)
+        else:
+            with col5:  
+                st.image(img)
+
 def get_request(url,parameters=None, steamspy=False):
     """Return json-formatted response of a get request using optional parameters.
     
@@ -82,12 +115,12 @@ def get_request(url,parameters=None, steamspy=False):
             print('Retrying.')
             return get_request(url, parameters, steamspy)
         
-def plot_nmf_topics(data_samples, n_features, stop_words, n_components, n_top_words, init, title):
+def plot_nmf_topics(good_review_list, bad_review_list, n_features, stop_words, n_components, n_top_words, init, title):
     """Plot NMF topics."""
     tfidf_vectorizer = TfidfVectorizer(
         max_df=0.95, min_df=2, max_features=n_features, stop_words=stop_words
     )
-    tfidf = tfidf_vectorizer.fit_transform(data_samples)
+    tfidf = tfidf_vectorizer.fit_transform(good_review_list+ bad_review_list)
     
     nmf = NMF(
     n_components=n_components,
@@ -100,8 +133,13 @@ def plot_nmf_topics(data_samples, n_features, stop_words, n_components, n_top_wo
     ).fit(tfidf)
     
     tfidf_feature_names = tfidf_vectorizer.get_feature_names_out()
-    plot_top_words(
-        nmf, tfidf_feature_names, n_top_words, title, n_components
+    w = nmf.transform(tfidf)
+    pos_sum = np.sum(w[:len(good_review_list)], axis=0)
+    neg_sum = np.sum(w[len(good_review_list):], axis=0)
+    tot_sum = pos_sum + neg_sum
+    pos_sum_percent = pos_sum / (tot_sum+0.01)
+    generate_wordclouds(
+        nmf, tfidf_feature_names, n_top_words, n_components, pos_sum_percent, tot_sum
     )
         
 @st.cache_data
@@ -116,10 +154,9 @@ def get_steam_df():
     return pd.DataFrame(get_request("https://api.steampowered.com/ISteamApps/GetAppList/v2/?")["applist"]["apps"]).set_index("appid")
 
 @st.cache_data
-def parse_steamreviews_request(appid):
-    """Parser to handle SteamSpy API data."""
+def parse_steamreviews_request_balanced(appid):
     num_per_page = 100
-    max_good_review = 300  # max number of good reviews to return
+    max_good_review = 100  # max number of good reviews to return
     max_bad_review = 100
     good_review_count = 0
     bad_review_count = 0
@@ -160,38 +197,95 @@ def parse_steamreviews_request(appid):
         #st.write(json_data)
     return good_review_list, bad_review_list, summary
 
-st.write("Search for a Steam Game")
+def get_summary(appid):
+    """Return summary of reviews for a given appid."""
+    url = "https://store.steampowered.com/appreviews/" + str(appid)
+    parameters = {"json": 1, "purchase_type": "all", "review_type": "all"}
+    json_data = get_request(url, parameters)
+    return json_data['query_summary']
+
+@st.cache_data
+def parse_steamreviews_request_raw(appid):
+    num_per_page = 100
+    max_review = 300  # max number of good reviews to return
+    review_count = 0
+    good_review_list = []
+    bad_review_list = []
+    url = "https://store.steampowered.com/appreviews/" + str(appid)
+    print(url)
+    parameters = {"json": 1, "cursor": "*", "num_per_page": num_per_page, "language": "english", "purchase_type": "all", "review_type": "all"}
+    #see cursor
+    #https://partner.steamgames.com/doc/store/getreviews
+    json_data = get_request(url, parameters)
+    summary = json_data['query_summary']
+    wnl = WordNetLemmatizer()
+    while review_count < max_review:
+        # if we have not reached the maximum number of good or bad reviews, and there are still reviews to fetch
+        if summary["num_reviews"] == 0:
+            break
+        json_data = get_request(url, parameters)
+        for review in json_data["reviews"]:
+            lemmatized_string = ' '.join([wnl.lemmatize(words) for words in nltk.word_tokenize(review["review"])])
+            review_count += 1
+            if review["voted_up"]:
+                good_review_list.append(lemmatized_string)
+            else:
+                bad_review_list.append(lemmatized_string)
+        # get next page of reviews
+        parameters["cursor"] = json_data["cursor"]
+        summary = json_data['query_summary']
+        #st.write(json_data)
+    return good_review_list, bad_review_list, summary
+
 search_input = st.text_input("Search Steam Game", key="search_input")
 if search_input == "":
     search_request = False
 else:
     search_request = True
-st.write(search_input)
 df = pd.DataFrame(get_steam_df())
 df = df[df["name"].str.contains(search_input, case=False, na=False)]
 if search_request:
-    appname = st.selectbox("Select game", df["name"], disabled=not search_request)
-    appid = df[df["name"]==appname].index[0]
-    extra_stop_words = {"lot","10","h1","n't", "game", "games", "play", "steam", "valve", "played", "playing"}
-    extra_stop_words = extra_stop_words.union(set(appname.lower().split()))
-    stop_words = stopwords.union(extra_stop_words)
-    good_review_list, bad_review_list, summary = parse_steamreviews_request(appid)
-    n_samples = 1000
-    n_features = 400
-    n_components = 20
-    n_top_words = 3
-    batch_size = 128
-    init = "nndsvda"
-    
-    st.write("Good Reviews:")
-    good_wordcloud = WordCloud(width=800,stopwords=stop_words, height=400, background_color='black').generate(' '.join(good_review_list))   
-    st.image(good_wordcloud.to_array())
-    plot_nmf_topics(good_review_list, n_features, list(stop_words), n_components, n_top_words, init, title="Topics in Good Reviews")
-    
-    st.write("Bad Reviews:")
-    bad_wordcloud = WordCloud(width=800,stopwords=stop_words, height=400, background_color='black').generate(' '.join(bad_review_list))   
-    st.image(bad_wordcloud.to_array())
-    plot_nmf_topics(bad_review_list, n_features, list(stop_words), n_components, n_top_words, init, title="Topics in Bad Reviews")  
+    appname = st.selectbox("Select game", df["name"], disabled=not search_request, index=0)
+    col_image, col_stats = st.columns(2)
+    with col_image:
+        st.image(f"https://cdn.akamai.steamstatic.com/steam/apps/{df[df['name']==appname].index[0]}/header.jpg", use_container_width=True)
+    with col_stats:
+        col_total, col_summary = st.columns(2)
+        appid = df[df["name"]==appname].index[0]
+        summary = get_summary(appid)
+        with col_total:
+            st.write(f"**App ID:** {appid}")
+            st.write(f"**Total Reviews:** {summary['total_reviews']}")
+            st.write(f"**Positive Reviews:** {summary['total_positive']}")
+            st.write(f"**Negative Reviews:** {summary['total_negative']}")
+        with col_summary:
+            st.write(f"**Positive Percentage:** {summary['total_positive']/ summary['total_reviews']:.2%}")
+            st.write(f"**Review Score Desc:** {summary['review_score_desc']}")
+    if st.button("Generate Review Analysis"):
+        appid = df[df["name"]==appname].index[0]
+        
+        extra_stop_words = {"lot","10","h1","n't", "game", "games", "play", "steam", "valve", "played", "playing"}
+        extra_stop_words = extra_stop_words.union(set(appname.lower().split()))
+        stop_words = stopwords.union(extra_stop_words)
+        
+        good_review_list, bad_review_list, summary = parse_steamreviews_request_raw(appid)
+        n_samples = 1000
+        n_features = 400
+        n_components = 30
+        n_top_words = 4
+        batch_size = 128
+        init = "nndsvda"
+        
+        st.write("Summary of reviews:")
+        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words), n_components, n_top_words, init, title="Topics in Bad Reviews")
 
-    
-
+        good_review_list, bad_review_list, summary = parse_steamreviews_request_balanced(appid)
+        n_samples = 1000
+        n_features = 400
+        n_components = 30
+        n_top_words = 4
+        batch_size = 128
+        init = "nndsvda"
+        
+        st.write("Comparison of good vs bad reviews:")
+        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words), n_components, n_top_words, init, title="Topics in Bad Reviews")
