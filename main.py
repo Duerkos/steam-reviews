@@ -36,7 +36,10 @@ def add_summary_text_image(header, summary,subtext):
     draw = ImageDraw.Draw(img)
 
     # Load a font (adjust the path and size as needed)
-    font = ImageFont.truetype("arial.ttf", 40)
+
+    req = requests.get("https://github.com/googlefonts/roboto/blob/master/src/hinted/Roboto-Regular.ttf?raw=true")
+
+    font = ImageFont.truetype(BytesIO(req.content), 32)
 
     # Define text and position
     text1 = f"Positive: {summary['total_positive']/ summary['total_reviews']:.2%}"
