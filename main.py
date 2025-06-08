@@ -297,33 +297,37 @@ if search_request:
         with col_summary:
             st.write(f"**Positive Percentage:** {summary['total_positive']/ summary['total_reviews']:.2%}")
             st.write(f"**Review Score Desc:** {summary['review_score_desc']}")
-    if st.button("Generate Review Analysis"):
-        appid = df[df["name"]==appname].index[0]
-        
-        extra_stop_words = {"lot","10","h1","n't", "game", "games", "play", "steam", "valve", "played", "playing"}
-        extra_stop_words = extra_stop_words.union(set(appname.lower().split()))
-        stop_words = stopwords.union(extra_stop_words)
-        
-        good_review_list, bad_review_list, summary_not_needed = parse_steamreviews_request_raw(appid)
-        n_samples = 1000
-        n_features = 400
-        n_components = 30
-        n_top_words = 4
-        batch_size = 128
-        init = "nndsvda"
-        
-        st.write("Summary of reviews:")
-        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words),
-                        n_components, n_top_words, init, img, summary, "Popular Opinions")
+    col_analysis, col_link = st.columns(2)
+    with col_link:
+        st.link_button("Store Link", f"https://store.steampowered.com/app/{df[df['name']==appname].index[0]}")
+    with col_analysis:
+        if st.button("Generate Review Analysis"):
+            appid = df[df["name"]==appname].index[0]
+            
+            extra_stop_words = {"lot","10","h1","n't", "game", "games", "play", "steam", "valve", "played", "playing"}
+            extra_stop_words = extra_stop_words.union(set(appname.lower().split()))
+            stop_words = stopwords.union(extra_stop_words)
+            
+            good_review_list, bad_review_list, summary_not_needed = parse_steamreviews_request_raw(appid)
+            n_samples = 1000
+            n_features = 400
+            n_components = 30
+            n_top_words = 4
+            batch_size = 128
+            init = "nndsvda"
+            
+            st.write("Summary of reviews:")
+            plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words),
+                            n_components, n_top_words, init, img, summary, "Popular Opinions")
 
-        good_review_list, bad_review_list, summary_not_needed = parse_steamreviews_request_balanced(appid)
-        n_samples = 1000
-        n_features = 400
-        n_components = 30
-        n_top_words = 4
-        batch_size = 128
-        init = "nndsvda"
-        
-        st.write("Comparison of good vs bad reviews:")
-        plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words),
-                        n_components, n_top_words, init, img, summary, "The Good & the Bad")
+            good_review_list, bad_review_list, summary_not_needed = parse_steamreviews_request_balanced(appid)
+            n_samples = 1000
+            n_features = 400
+            n_components = 30
+            n_top_words = 4
+            batch_size = 128
+            init = "nndsvda"
+            
+            st.write("Comparison of good vs bad reviews:")
+            plot_nmf_topics(good_review_list, bad_review_list, n_features, list(stop_words),
+                            n_components, n_top_words, init, img, summary, "The Good & the Bad")
